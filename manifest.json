@@ -1,0 +1,11 @@
+{
+  "name": "Email App Manager",
+  "short_name": "EmailManager",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "icons": [
+    { "src": "https://img.icons8.com/fluency/96/secured-letter.png", "sizes": "96x96", "type": "image/png" }
+  ]
+}

@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Email App Usage Manager</title>
+
+<!-- Tambahan penting untuk PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#121212">
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js')
+    .then(()=>console.log('✅ Service worker terdaftar'))
+    .catch(err=>console.error('SW error',err));
+  });
+}
+</script>
+
+<style>
+  :root{
+    --bg:#121212; --panel:#1e1e1e; --muted:#888; --accent:#0078D7;
+    --btn1:#4CAF50; --btn2:#2196F3; --btn3:#9C27B0; --danger:#f44336;
+    color-scheme: dark;
+  }
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:var(--bg);color:#eee}
+  .container{max-width:900px;margin:18px auto;padding:16px;background:var(--panel);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.6)}
+  input[type="text"], input[type="password"]{background:#2d2d2d;border:1px solid #333;padding:8px;border-radius:8px;color:#fff;width:100%;margin:4px 0}
+  button{border:0;padding:8px 12px;border-radius:8px;cursor:pointer;margin:2px 0}
+  .btn-green{background:var(--btn1);color:#fff}
+  .btn-blue{background:var(--btn2);color:#fff}
+  .btn-danger{background:var(--danger);color:#fff}
+  .hidden{display:none}
+  table{width:100%;border-collapse:collapse;margin-top:10px}
+  th,td{border-bottom:1px solid #333;padding:6px}
+  tr.selected{background:rgba(0,120,215,0.15)}
+</style>
+</head>
+<body>
+<div class="container">
+  <h2>Email App Manager (Offline)</h2>
+
+  <div id="loginPanel">
+    <h3 id="loginTitle"></h3>
+    <input id="loginPass1" type="password" placeholder="Password">
+    <input id="loginPass2" type="password" placeholder="Ulangi Password" class="hidden">
+    <button id="loginBtn" class="btn-blue">OK</button>
+  </div>
+
+  <div id="mainArea" class="hidden">
+    <input id="emailInput" type="text" placeholder="Email (tanpa @)">
+    <input id="passInput" type="password" placeholder="Password">
+    <button id="addBtn" class="btn-green">Tambah</button>
+    <button id="toggleBtn" class="btn-blue">Tampilkan Password</button>
+
+    <table id="table">
+      <thead><tr><th>Email</th><th>Password</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <button id="delBtn" class="btn-danger">Hapus Baris</button>
+  </div>
+</div>
+
+<script>
+const SALT_KEY="email_salt",DATA_KEY="email_data";
+const enc=new TextEncoder(),dec=new TextDecoder();
+function b64e(b){return btoa(String.fromCharCode(...new Uint8Array(b)));}
+function b64d(s){const b=atob(s);return Uint8Array.from(b,c=>c.charCodeAt(0));}
+function rand(n){return crypto.getRandomValues(new Uint8Array(n));}
+
+let cryptoKey=null,data=[],hidden=true,sel=null;
+
+async function deriveKey(pw,salt){
+  const base=await crypto.subtle.importKey("raw",enc.encode(pw),{name:"PBKDF2"},false,["deriveKey"]);
+  return crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:100000,hash:"SHA-256"},base,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
+}
+async function encObj(obj,key){
+  const iv=rand(12);const pt=enc.encode(JSON.stringify(obj));
+  const ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},key,pt));
+  const c=new Uint8Array(iv.length+ct.length);c.set(iv,0);c.set(ct,iv.length);
+  return b64e(c);
+}
+async function decObj(b64,key){
+  const arr=b64d(b64);const iv=arr.slice(0,12),ct=arr.slice(12);
+  const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv},key,ct);
+  return JSON.parse(dec.decode(pt));
+}
+async function save(){localStorage.setItem(DATA_KEY,await encObj(data,cryptoKey));}
+async function load(k){
+  const d=localStorage.getItem(DATA_KEY);
+  if(!d){data=[];return;}
+  data=await decObj(d,k);
+}
+function render(){
+  const tb=document.querySelector("#table tbody");
+  tb.innerHTML="";
+  if(data.length===0){tb.innerHTML="<tr><td colspan=2>Belum ada data</td></tr>";return;}
+  data.forEach((d,i)=>{
+    const tr=document.createElement("tr");
+    tr.className=i===sel?"selected":"";
+    tr.onclick=()=>{sel=i;render();};
+    tr.innerHTML=`<td>${d.e}</td><td>${hidden?"********":d.p}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+/* tombol utama */
+document.getElementById("addBtn").onclick=async()=>{
+  const e=document.getElementById("emailInput").value.trim();
+  const p=document.getElementById("passInput").value.trim();
+  if(!e||!p)return;
+  data.push({e:e.includes("@")?e:e+"@gmail.com",p});
+  document.getElementById("emailInput").value="";
+  document.getElementById("passInput").value="";
+  await save();render();
+};
+document.getElementById("toggleBtn").onclick=()=>{
+  hidden=!hidden;render();
+};
+document.getElementById("delBtn").onclick=async()=>{
+  if(sel==null)return alert("Pilih baris dulu");
+  if(confirm("Hapus baris ini?")){data.splice(sel,1);sel=null;await save();render();}
+};
+
+/* login/setup */
+async function init(){
+  const salt64=localStorage.getItem(SALT_KEY);
+  const login=document.getElementById("loginPanel");
+  const main=document.getElementById("mainArea");
+  const t=document.getElementById("loginTitle");
+  const p1=document.getElementById("loginPass1");
+  const p2=document.getElementById("loginPass2");
+  const btn=document.getElementById("loginBtn");
+
+  if(!salt64){
+    t.textContent="Buat Password Aplikasi";
+    p2.classList.remove("hidden");
+    btn.onclick=async()=>{
+      if(p1.value!==p2.value||!p1.value)return alert("Password tidak cocok / kosong");
+      const s=rand(16);const s64=b64e(s);localStorage.setItem(SALT_KEY,s64);
+      cryptoKey=await deriveKey(p1.value,s);
+      data=[];await save();
+      login.classList.add("hidden");main.classList.remove("hidden");render();
+    };
+  }else{
+    t.textContent="Masukkan Password";
+    btn.onclick=async()=>{
+      try{
+        const key=await deriveKey(p1.value,b64d(salt64));
+        await load(key);
+        cryptoKey=key;
+        login.classList.add("hidden");
+        main.classList.remove("hidden");
+        render();
+      }catch(e){alert("Password salah atau data rusak!");}
+    };
+  }
+}
+init();
+</script>
+</body>
+</html>
