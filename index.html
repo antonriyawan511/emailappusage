@@ -3,21 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Email App Usage Manager</title>
-
-<!-- Tambahan penting untuk PWA -->
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#121212">
-<script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('service-worker.js')
-    .then(()=>console.log('✅ Service worker terdaftar'))
-    .catch(err=>console.error('SW error',err));
-  });
-}
-</script>
-
+<title>Email App Usage Manager (Android Ready)</title>
 <style>
   :root{
     --bg:#121212; --panel:#1e1e1e; --muted:#888; --accent:#0078D7;
@@ -25,134 +11,223 @@ if ('serviceWorker' in navigator) {
     color-scheme: dark;
   }
   html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:var(--bg);color:#eee}
-  .container{max-width:900px;margin:18px auto;padding:16px;background:var(--panel);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.6)}
-  input[type="text"], input[type="password"]{background:#2d2d2d;border:1px solid #333;padding:8px;border-radius:8px;color:#fff;width:100%;margin:4px 0}
-  button{border:0;padding:8px 12px;border-radius:8px;cursor:pointer;margin:2px 0}
+  .container{max-width:1200px;margin:18px auto;padding:16px;background:var(--panel);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.6)}
+  .row{display:flex;gap:8px;align-items:center}
+  .inputs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  input[type="text"], input[type="password"]{background:#2d2d2d;border:1px solid #333;padding:8px;border-radius:8px;color:#fff}
+  button{border:0;padding:8px 12px;border-radius:8px;cursor:pointer}
   .btn-green{background:var(--btn1);color:#fff}
   .btn-blue{background:var(--btn2);color:#fff}
+  .btn-mag{background:var(--btn3);color:#fff}
+  .btn-orange{background:#FF9800;color:#111}
   .btn-danger{background:var(--danger);color:#fff}
-  .hidden{display:none}
-  table{width:100%;border-collapse:collapse;margin-top:10px}
-  th,td{border-bottom:1px solid #333;padding:6px}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .table-wrap{overflow:auto;border:1px solid #2b2b2b;border-radius:8px;padding:8px;background:#151515}
+  table{border-collapse:collapse;width:100%;min-width:600px}
+  th,td{padding:8px 10px;border-bottom:1px solid #222;text-align:left}
+  th{position:sticky;top:0;background:linear-gradient(#1b1b1b,#141414);z-index:2}
+  th.app-col{cursor:context-menu}
   tr.selected{background:rgba(0,120,215,0.15)}
+  .mask{letter-spacing:3px}
+  footer{margin-top:10px;color:var(--muted);font-size:13px;text-align:center}
+  .small{font-size:13px;color:var(--muted)}
+  .hidden{display:none}
+  #loginPanel{background:#1b1b1b;padding:16px;border-radius:8px;margin:16px auto;max-width:360px;text-align:center}
+  #loginPanel input{width:100%;margin:6px 0}
 </style>
 </head>
 <body>
-<div class="container">
-  <h2>Email App Manager (Offline)</h2>
+<div class="container" id="app">
+  <h2>Email App Usage Manager (Android)</h2>
+
+  <div id="authArea" class="small"></div>
 
   <div id="loginPanel">
     <h3 id="loginTitle"></h3>
-    <input id="loginPass1" type="password" placeholder="Password">
-    <input id="loginPass2" type="password" placeholder="Ulangi Password" class="hidden">
+    <input id="loginPass1" type="password" placeholder="Masukkan password">
+    <input id="loginPass2" type="password" placeholder="Ulangi password" class="hidden">
     <button id="loginBtn" class="btn-blue">OK</button>
   </div>
 
   <div id="mainArea" class="hidden">
-    <input id="emailInput" type="text" placeholder="Email (tanpa @)">
-    <input id="passInput" type="password" placeholder="Password">
-    <button id="addBtn" class="btn-green">Tambah</button>
-    <button id="toggleBtn" class="btn-blue">Tampilkan Password</button>
+    <div class="inputs">
+      <input id="emailInput" type="text" placeholder="Email (tanpa @)">
+      <input id="passInput" type="password" placeholder="Password">
+      <button class="btn-green" id="addEmailBtn">Add Email</button>
+      <button class="btn-blue" id="addAppBtn">Add App</button>
+    </div>
 
-    <table id="table">
-      <thead><tr><th>Email</th><th>Password</th></tr></thead>
-      <tbody></tbody>
-    </table>
+    <div class="controls">
+      <button id="copyEmailBtn" class="btn-mag">Copy Email</button>
+      <button id="copyPassBtn" class="btn-orange">Copy Password</button>
+      <button id="copyAllBtn" class="btn-blue">Copy All</button>
+      <button id="delRowBtn" class="btn-danger">Delete Row</button>
+      <button id="togglePassBtn" class="btn-mag">Show Passwords</button>
+    </div>
 
-    <button id="delBtn" class="btn-danger">Hapus Baris</button>
+    <div class="table-wrap" id="tableWrap">
+      <table id="mainTable">
+        <thead><tr id="theadRow"></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+
+    <footer>Data disimpan terenkripsi di browser (localStorage)</footer>
   </div>
 </div>
 
 <script>
-const SALT_KEY="email_salt",DATA_KEY="email_data";
 const enc=new TextEncoder(),dec=new TextDecoder();
-function b64e(b){return btoa(String.fromCharCode(...new Uint8Array(b)));}
-function b64d(s){const b=atob(s);return Uint8Array.from(b,c=>c.charCodeAt(0));}
+function b64e(buf){return btoa(String.fromCharCode(...new Uint8Array(buf)));}
+function b64d(s){const b=atob(s);const a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a.buffer;}
 function rand(n){return crypto.getRandomValues(new Uint8Array(n));}
 
-let cryptoKey=null,data=[],hidden=true,sel=null;
+const SALT_KEY="email_app_salt",DATA_KEY="email_app_data";
+const NONCE_SIZE=12;
+let cryptoKey=null,accounts=[],appColumns=[],passwordHidden=true,selectedRow=null;
 
-async function deriveKey(pw,salt){
+async function deriveKey(pw,salt64){
+  const salt=b64d(salt64);
   const base=await crypto.subtle.importKey("raw",enc.encode(pw),{name:"PBKDF2"},false,["deriveKey"]);
   return crypto.subtle.deriveKey({name:"PBKDF2",salt,iterations:100000,hash:"SHA-256"},base,{name:"AES-GCM",length:256},false,["encrypt","decrypt"]);
 }
-async function encObj(obj,key){
-  const iv=rand(12);const pt=enc.encode(JSON.stringify(obj));
-  const ct=new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM",iv},key,pt));
-  const c=new Uint8Array(iv.length+ct.length);c.set(iv,0);c.set(ct,iv.length);
-  return b64e(c);
+async function encryptData(obj,key){
+  const iv=rand(NONCE_SIZE);
+  const data=enc.encode(JSON.stringify(obj));
+  const ct=await crypto.subtle.encrypt({name:"AES-GCM",iv},key,data);
+  const combo=new Uint8Array(iv.length+ct.byteLength);
+  combo.set(iv,0);combo.set(new Uint8Array(ct),iv.length);
+  return b64e(combo);
 }
-async function decObj(b64,key){
-  const arr=b64d(b64);const iv=arr.slice(0,12),ct=arr.slice(12);
+async function decryptData(b64,key){
+  const arr=new Uint8Array(b64d(b64));
+  const iv=arr.slice(0,NONCE_SIZE),ct=arr.slice(NONCE_SIZE);
   const pt=await crypto.subtle.decrypt({name:"AES-GCM",iv},key,ct);
   return JSON.parse(dec.decode(pt));
 }
-async function save(){localStorage.setItem(DATA_KEY,await encObj(data,cryptoKey));}
-async function load(k){
-  const d=localStorage.getItem(DATA_KEY);
-  if(!d){data=[];return;}
-  data=await decObj(d,k);
+async function save(){
+  if(!cryptoKey)return;
+  const data={accounts,apps:appColumns};
+  localStorage.setItem(DATA_KEY,await encryptData(data,cryptoKey));
 }
-function render(){
-  const tb=document.querySelector("#table tbody");
+async function load(key){
+  const encB64=localStorage.getItem(DATA_KEY);
+  if(!encB64){accounts=[];appColumns=[];return;}
+  const d=await decryptData(encB64,key);
+  accounts=d.accounts||[];appColumns=d.apps||[];
+}
+
+function renderHead(){
+  const tr=document.getElementById("theadRow");
+  tr.innerHTML="";
+  ["Email","Password",...appColumns].forEach((c,i)=>{
+    const th=document.createElement("th");
+    th.textContent=c;
+    if(i>=2){
+      th.onclick=()=>{if(confirm("Hapus kolom "+c+"?")){appColumns.splice(i-2,1);accounts.forEach(a=>delete a.apps[c]);save();render();}};
+    }
+    tr.appendChild(th);
+  });
+}
+function renderBody(){
+  const tb=document.getElementById("tbody");
   tb.innerHTML="";
-  if(data.length===0){tb.innerHTML="<tr><td colspan=2>Belum ada data</td></tr>";return;}
-  data.forEach((d,i)=>{
+  if(accounts.length===0){tb.innerHTML="<tr><td colspan='3' style='opacity:.6'>Kosong</td></tr>";return;}
+  accounts.forEach((acc,idx)=>{
     const tr=document.createElement("tr");
-    tr.className=i===sel?"selected":"";
-    tr.onclick=()=>{sel=i;render();};
-    tr.innerHTML=`<td>${d.e}</td><td>${hidden?"********":d.p}</td>`;
+    if(selectedRow===idx)tr.style.background="rgba(0,120,215,0.15)";
+    tr.onclick=()=>{selectedRow=idx;renderBody();};
+    tr.innerHTML=`<td>${acc.email}</td><td style="text-align:center">${passwordHidden?"********":acc.password}</td>`;
+    appColumns.forEach(name=>{
+      const td=document.createElement("td");
+      td.textContent=acc.apps?.[name]?"☑":"☐";
+      td.style.textAlign="center";
+      td.onclick=()=>{acc.apps[name]=!acc.apps[name];save();renderBody();};
+      tr.appendChild(td);
+    });
     tb.appendChild(tr);
   });
 }
+function render(){renderHead();renderBody();}
 
-/* tombol utama */
-document.getElementById("addBtn").onclick=async()=>{
-  const e=document.getElementById("emailInput").value.trim();
-  const p=document.getElementById("passInput").value.trim();
+document.getElementById("addEmailBtn").onclick=async()=>{
+  let e=document.getElementById("emailInput").value.trim();
+  let p=document.getElementById("passInput").value.trim();
   if(!e||!p)return;
-  data.push({e:e.includes("@")?e:e+"@gmail.com",p});
+  if(!e.includes("@"))e+="@gmail.com";
+  const apps={};appColumns.forEach(a=>apps[a]=false);
+  accounts.push({email:e,password:p,apps});
   document.getElementById("emailInput").value="";
   document.getElementById("passInput").value="";
   await save();render();
 };
-document.getElementById("toggleBtn").onclick=()=>{
-  hidden=!hidden;render();
+document.getElementById("addAppBtn").onclick=async()=>{
+  const n=prompt("Nama App:");if(!n)return;
+  if(appColumns.includes(n))return alert("Sudah ada");
+  appColumns.push(n);accounts.forEach(a=>a.apps[n]=false);
+  await save();render();
 };
-document.getElementById("delBtn").onclick=async()=>{
-  if(sel==null)return alert("Pilih baris dulu");
-  if(confirm("Hapus baris ini?")){data.splice(sel,1);sel=null;await save();render();}
+document.getElementById("delRowBtn").onclick=async()=>{
+  if(selectedRow==null)return alert("Pilih baris");
+  if(!confirm("Hapus baris?"))return;
+  accounts.splice(selectedRow,1);selectedRow=null;
+  await save();render();
+};
+document.getElementById("togglePassBtn").onclick=()=>{
+  passwordHidden=!passwordHidden;
+  document.getElementById("togglePassBtn").textContent=passwordHidden?"Show Passwords":"Hide Passwords";
+  render();
+};
+document.getElementById("copyEmailBtn").onclick=()=>{
+  if(selectedRow==null)return alert("Pilih baris");
+  navigator.clipboard.writeText(accounts[selectedRow].email);
+  alert("Email disalin");
+};
+document.getElementById("copyPassBtn").onclick=()=>{
+  if(selectedRow==null)return alert("Pilih baris");
+  navigator.clipboard.writeText(accounts[selectedRow].password);
+  alert("Password disalin");
+};
+document.getElementById("copyAllBtn").onclick=()=>{
+  if(selectedRow==null)return alert("Pilih baris");
+  navigator.clipboard.writeText(`${accounts[selectedRow].email}\n${accounts[selectedRow].password}`);
+  alert("Email & Password disalin");
 };
 
-/* login/setup */
+/* --- Login & setup --- */
 async function init(){
-  const salt64=localStorage.getItem(SALT_KEY);
-  const login=document.getElementById("loginPanel");
-  const main=document.getElementById("mainArea");
+  const salt=localStorage.getItem(SALT_KEY);
+  const loginPanel=document.getElementById("loginPanel");
+  const mainArea=document.getElementById("mainArea");
   const t=document.getElementById("loginTitle");
   const p1=document.getElementById("loginPass1");
   const p2=document.getElementById("loginPass2");
   const btn=document.getElementById("loginBtn");
 
-  if(!salt64){
+  if(!salt){
     t.textContent="Buat Password Aplikasi";
     p2.classList.remove("hidden");
     btn.onclick=async()=>{
-      if(p1.value!==p2.value||!p1.value)return alert("Password tidak cocok / kosong");
-      const s=rand(16);const s64=b64e(s);localStorage.setItem(SALT_KEY,s64);
+      if(!p1.value||!p2.value)return alert("Isi dua-duanya");
+      if(p1.value!==p2.value)return alert("Tidak cocok");
+      const s=b64e(rand(16));
+      localStorage.setItem(SALT_KEY,s);
       cryptoKey=await deriveKey(p1.value,s);
-      data=[];await save();
-      login.classList.add("hidden");main.classList.remove("hidden");render();
+      accounts=[];appColumns=[];
+      await save();
+      loginPanel.classList.add("hidden");
+      mainArea.classList.remove("hidden");
+      render();
     };
   }else{
     t.textContent="Masukkan Password";
     btn.onclick=async()=>{
       try{
-        const key=await deriveKey(p1.value,b64d(salt64));
+        const key=await deriveKey(p1.value,salt);
         await load(key);
         cryptoKey=key;
-        login.classList.add("hidden");
-        main.classList.remove("hidden");
+        loginPanel.classList.add("hidden");
+        mainArea.classList.remove("hidden");
         render();
       }catch(e){alert("Password salah atau data rusak!");}
     };
